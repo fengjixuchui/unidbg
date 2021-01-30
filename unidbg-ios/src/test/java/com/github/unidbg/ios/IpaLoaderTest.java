@@ -21,14 +21,11 @@ import java.util.concurrent.Callable;
 
 public class IpaLoaderTest implements EmulatorConfigurator {
 
-    static {
-        HypervisorLoader.useHypervisor();
-        DynarmicLoader.useDynarmic();
-    }
-
     public void testLoader() throws Exception {
         Logger.getLogger("com.github.unidbg.AbstractEmulator").setLevel(Level.INFO);
         long start = System.currentTimeMillis();
+        HypervisorLoader.useHypervisor();
+        DynarmicLoader.useDynarmic();
         LoadedIpa loader = new IpaLoader64(new File("unidbg-ios/src/test/resources/app/TelegramMessenger-5.11.ipa"),
                 new File("target/rootfs/ipa")).load(this);
         final Emulator<?> emulator = loader.getEmulator();
@@ -38,6 +35,7 @@ public class IpaLoaderTest implements EmulatorConfigurator {
         emulator.attach().run(new Callable<Void>() {
             @Override
             public Void call() {
+                long start = System.currentTimeMillis();
                 IClassDumper classDumper = ClassDumper.getInstance(emulator);
                 String objcClass = classDumper.dumpClass("AppDelegate");
                 System.out.println(objcClass);
@@ -45,7 +43,7 @@ public class IpaLoaderTest implements EmulatorConfigurator {
                 Symbol _TelegramCoreVersionString = module.findSymbolByName("_TelegramCoreVersionString");
                 Pointer pointer = UnidbgPointer.pointer(emulator, _TelegramCoreVersionString.getAddress());
                 assert pointer != null;
-                System.out.println("_TelegramCoreVersionString=" + pointer.getString(0));
+                System.out.println("_TelegramCoreVersionString=" + pointer.getString(0) + "offset=" + (System.currentTimeMillis() - start) + "ms");
                 return null;
             }
         });

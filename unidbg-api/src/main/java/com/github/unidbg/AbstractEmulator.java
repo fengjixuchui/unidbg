@@ -169,7 +169,7 @@ public abstract class AbstractEmulator<T extends NewFileIO> implements Emulator<
         try {
             emulate(pointer.peer, pointer.peer + shellCode.length, 0, false);
         } finally {
-            block.free(false);
+            block.free();
             getMemory().setStackPoint(spBackup);
         }
     }
@@ -346,7 +346,7 @@ public abstract class AbstractEmulator<T extends NewFileIO> implements Emulator<
 
             if (traceOutFile != null) {
                 try {
-                    redirect = new PrintStream(traceOutFile);
+                    redirect = new PrintStream(new FileOutputStream(traceOutFile, true), false);
                 } catch (FileNotFoundException e) {
                     log.warn("Set trace out file failed", e);
                 }
