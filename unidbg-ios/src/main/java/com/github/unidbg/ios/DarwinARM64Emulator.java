@@ -3,6 +3,7 @@ package com.github.unidbg.ios;
 import com.github.unidbg.Family;
 import com.github.unidbg.arm.AbstractARM64Emulator;
 import com.github.unidbg.arm.backend.BackendException;
+import com.github.unidbg.arm.backend.BackendFactory;
 import com.github.unidbg.file.FileSystem;
 import com.github.unidbg.file.ios.DarwinFileIO;
 import com.github.unidbg.file.ios.DarwinFileSystem;
@@ -19,25 +20,13 @@ import unicorn.UnicornConst;
 
 import java.io.File;
 import java.net.URL;
+import java.util.Collection;
 import java.util.Collections;
 
 public class DarwinARM64Emulator extends AbstractARM64Emulator<DarwinFileIO> {
 
-    public DarwinARM64Emulator() {
-        this(null, null);
-    }
-
-    @SuppressWarnings("unused")
-    public DarwinARM64Emulator(String processName) {
-        this(processName, null);
-    }
-
-    public DarwinARM64Emulator(File rootDir) {
-        this(null, rootDir);
-    }
-
-    public DarwinARM64Emulator(String processName, File rootDir, String... envs) {
-        super(processName, rootDir, Family.iOS, envs);
+    protected DarwinARM64Emulator(String processName, File rootDir, Collection<BackendFactory> backendFactories, String... envs) {
+        super(processName, rootDir, Family.iOS, backendFactories, envs);
     }
 
     @Override

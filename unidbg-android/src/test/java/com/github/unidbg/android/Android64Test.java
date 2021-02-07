@@ -4,7 +4,8 @@ import com.github.unidbg.AndroidEmulator;
 import com.github.unidbg.Emulator;
 import com.github.unidbg.LibraryResolver;
 import com.github.unidbg.Module;
-import com.github.unidbg.arm.backend.dynarmic.DynarmicLoader;
+import com.github.unidbg.arm.backend.BackendFactory;
+import com.github.unidbg.arm.backend.HypervisorFactory;
 import com.github.unidbg.file.linux.AndroidFileIO;
 import com.github.unidbg.linux.ARM64SyscallHandler;
 import com.github.unidbg.linux.android.AndroidARM64Emulator;
@@ -20,6 +21,7 @@ import org.apache.log4j.Logger;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
 
 public class Android64Test extends AbstractJni {
 
@@ -42,10 +44,10 @@ public class Android64Test extends AbstractJni {
     }
 
     private Android64Test() throws IOException {
-        DynarmicLoader.useDynarmic();
-
-        File executable = new File("unidbg-android/src/test/native/android/libs/arm64-v8a/test");
-        emulator = new AndroidARM64Emulator(executable.getName(), new File("target/rootfs")) {
+        final File executable = new File("unidbg-android/src/test/native/android/libs/arm64-v8a/test");
+        emulator = new AndroidARM64Emulator(executable.getName(),
+                new File("target/rootfs"),
+                Collections.<BackendFactory>singleton(new HypervisorFactory(true))) {
             @Override
             protected UnixSyscallHandler<AndroidFileIO> createSyscallHandler(SvcMemory svcMemory) {
                 return new MyARMSyscallHandler(svcMemory);
