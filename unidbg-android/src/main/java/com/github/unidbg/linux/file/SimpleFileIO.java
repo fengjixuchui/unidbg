@@ -26,7 +26,23 @@ public class SimpleFileIO extends BaseAndroidFileIO implements NewFileIO {
 
     protected final File file;
     protected final String path;
-    private final RandomAccessFile randomAccessFile;
+    private RandomAccessFile _randomAccessFile;
+
+    private synchronized RandomAccessFile checkOpenFile() {
+        try {
+            if (_randomAccessFile == null) {
+                FileUtils.forceMkdir(file.getParentFile());
+                if (!file.exists() && !file.createNewFile()) {
+                    throw new IOException("createNewFile failed: " + file);
+                }
+                _randomAccessFile = new RandomAccessFile(file, "rws");
+                onFileOpened(_randomAccessFile);
+            }
+            return _randomAccessFile;
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
 
     public SimpleFileIO(int oflags, File file, String path) {
         super(oflags);
@@ -36,26 +52,14 @@ public class SimpleFileIO extends BaseAndroidFileIO implements NewFileIO {
         if (file.isDirectory()) {
             throw new IllegalArgumentException("file is directory: " + file);
         }
-
-        try {
-            FileUtils.forceMkdir(file.getParentFile());
-            if (!file.exists() && !file.createNewFile()) {
-                throw new IOException("createNewFile failed: " + file);
-            }
-
-            randomAccessFile = new RandomAccessFile(file, "rws");
-            onCreate(randomAccessFile);
-        } catch (IOException e) {
-            throw new IllegalStateException("process file failed: " + file.getAbsolutePath(), e);
-        }
     }
 
-    void onCreate(RandomAccessFile randomAccessFile) throws IOException {
+    void onFileOpened(RandomAccessFile randomAccessFile) throws IOException {
     }
 
     @Override
     public void close() {
-        IOUtils.closeQuietly(randomAccessFile);
+        IOUtils.closeQuietly(_randomAccessFile);
 
         if (debugStream != null) {
             try {
@@ -77,6 +81,7 @@ public class SimpleFileIO extends BaseAndroidFileIO implements NewFileIO {
                 Inspector.inspect(data, "write");
             }
 
+            RandomAccessFile randomAccessFile = checkOpenFile();
             if ((oflags & IOConstants.O_APPEND) != 0) {
                 randomAccessFile.seek(randomAccessFile.length());
             }
@@ -95,6 +100,7 @@ public class SimpleFileIO extends BaseAndroidFileIO implements NewFileIO {
 
     @Override
     public int read(Backend backend, Pointer pointer, final int _count) {
+        RandomAccessFile randomAccessFile = checkOpenFile();
         return Utils.readFile(randomAccessFile, pointer, _count);
     }
 
@@ -123,9 +129,11 @@ public class SimpleFileIO extends BaseAndroidFileIO implements NewFileIO {
 
     @Override
     protected byte[] getMmapData(int offset, int length) throws IOException {
+        RandomAccessFile randomAccessFile = checkOpenFile();
         randomAccessFile.seek(offset);
-        ByteArrayOutputStream baos = new ByteArrayOutputStream(length);
-        byte[] buf = new byte[10240];
+        int remaining = (int) (randomAccessFile.length() - randomAccessFile.getFilePointer());
+        ByteArrayOutputStream baos = remaining <= 0 ? new ByteArrayOutputStream() : new ByteArrayOutputStream(Math.min(length, remaining));
+        byte[] buf = new byte[1024];
         do {
             int count = length - baos.size();
             if (count == 0) {
@@ -172,6 +180,7 @@ public class SimpleFileIO extends BaseAndroidFileIO implements NewFileIO {
     @Override
     public int lseek(int offset, int whence) {
         try {
+            RandomAccessFile randomAccessFile = checkOpenFile();
             switch (whence) {
                 case SEEK_SET:
                     randomAccessFile.seek(offset);
@@ -193,6 +202,7 @@ public class SimpleFileIO extends BaseAndroidFileIO implements NewFileIO {
     @Override
     public int llseek(long offset, Pointer result, int whence) {
         try {
+            RandomAccessFile randomAccessFile = checkOpenFile();
             switch (whence) {
                 case SEEK_SET:
                     randomAccessFile.seek(offset);

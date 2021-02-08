@@ -9,6 +9,8 @@ import org.apache.commons.logging.LogFactory;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 
 public abstract class BaseFileSystem<T extends NewFileIO> implements FileSystem<T> {
 
@@ -156,14 +158,13 @@ public abstract class BaseFileSystem<T extends NewFileIO> implements FileSystem<
     public int rename(String oldPath, String newPath) {
         File oldFile = new File(rootDir, oldPath);
         File newFile = new File(rootDir, newPath);
+
         try {
             FileUtils.forceMkdir(newFile.getParentFile());
+
+            Files.move(oldFile.toPath(), newFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
             throw new IllegalStateException(e);
-        }
-
-        if (!oldFile.renameTo(newFile)) {
-            throw new IllegalStateException("rename failed: old=" + oldFile + ", new=" + newFile);
         }
         return 0;
     }
