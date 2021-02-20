@@ -1,3 +1,4 @@
+#include <unistd.h>
 #include <assert.h>
 #include <pthread.h>
 #include <sys/mman.h>
@@ -13,6 +14,10 @@ typedef struct hypervisor {
   pthread_key_t cpu_key;
   jobject callback = NULL;
   bool stop_request = false;
+  uint64_t sp = 0ULL;
+  uint64_t cpacr = 0ULL;
+  uint64_t tpidr = 0ULL;
+  uint64_t tpidrro = 0ULL;
 } *t_hypervisor;
 
 static jmethodID handleException = NULL;
@@ -46,7 +51,7 @@ static bool handle_exception(JNIEnv *env, t_hypervisor hypervisor, t_hypervisor_
   uint64_t syndrome = cpu->vcpu_exit->exception.syndrome;
   uint32_t ec = syn_get_ec(syndrome);
   switch(ec) {
-    case 0x16: { // Exception Class 0x16 is "HVC instruction execution in AArch64 state, when HVC is not disabled."
+    case EC_AA64_HVC: { // Exception Class 0x16 is "HVC instruction execution in AArch64 state, when HVC is not disabled."
       uint64_t esr = 0;
       HYP_ASSERT_SUCCESS(hv_vcpu_get_sys_reg(cpu->vcpu, HV_SYS_REG_ESR_EL1, &esr));
       uint64_t far = 0;
@@ -68,12 +73,12 @@ static bool handle_exception(JNIEnv *env, t_hypervisor hypervisor, t_hypervisor_
       uint64_t cpsr = 0;
       HYP_ASSERT_SUCCESS(hv_vcpu_get_sys_reg(cpu->vcpu, HV_SYS_REG_SPSR_EL1, &cpsr));
       uint64_t sp = 0;
-      HYP_ASSERT_SUCCESS(hv_vcpu_get_sys_reg(cpu->vcpu, HV_SYS_REG_SP_EL1, &sp));
+      HYP_ASSERT_SUCCESS(hv_vcpu_get_sys_reg(cpu->vcpu, HV_SYS_REG_SP_EL0, &sp));
       uint64_t esr = 0;
       HYP_ASSERT_SUCCESS(hv_vcpu_get_sys_reg(cpu->vcpu, HV_SYS_REG_ESR_EL1, &esr));
       uint64_t far = 0;
       HYP_ASSERT_SUCCESS(hv_vcpu_get_sys_reg(cpu->vcpu, HV_SYS_REG_FAR_EL1, &far));
-      fprintf(stderr, "Unexpected VM exception: 0x%llx, EC 0x%x, VirtAddr 0x%llx, IPA 0x%llx, ELR_EL1 0x%llx, SPSR_EL1 0x%llx, SP_EL1 0x%llx, ESR_EL1 0x%llx, FAR_EL1 0x%llx\n",
+      fprintf(stderr, "Unexpected VM exception: 0x%llx, EC 0x%x, VirtAddr 0x%llx, IPA 0x%llx, ELR_EL1 0x%llx, SPSR_EL1 0x%llx, SP_EL0 0x%llx, ESR_EL1 0x%llx, FAR_EL1 0x%llx\n",
                           syndrome,
                           ec,
                           cpu->vcpu_exit->exception.virtual_address,
@@ -84,7 +89,6 @@ static bool handle_exception(JNIEnv *env, t_hypervisor hypervisor, t_hypervisor_
                           esr,
                           far
                       );
-      abort();
       return false;
   }
   return true;
@@ -92,8 +96,13 @@ static bool handle_exception(JNIEnv *env, t_hypervisor hypervisor, t_hypervisor_
 
 static int cpu_loop(JNIEnv *env, t_hypervisor hypervisor, t_hypervisor_cpu cpu) {
   hypervisor->stop_request = false;
+  HYP_ASSERT_SUCCESS(hv_vcpu_set_sys_reg(cpu->vcpu, HV_SYS_REG_TPIDR_EL0, hypervisor->tpidr));
+  HYP_ASSERT_SUCCESS(hv_vcpu_set_sys_reg(cpu->vcpu, HV_SYS_REG_CPACR_EL1, hypervisor->cpacr));
   while(true) {
+    HYP_ASSERT_SUCCESS(hv_vcpu_set_sys_reg(cpu->vcpu, HV_SYS_REG_TPIDRRO_EL0, hypervisor->tpidrro));
+    HYP_ASSERT_SUCCESS(hv_vcpu_set_sys_reg(cpu->vcpu, HV_REG_SP, hypervisor->sp));
     HYP_ASSERT_SUCCESS(hv_vcpu_run(cpu->vcpu));
+    HYP_ASSERT_SUCCESS(hv_vcpu_get_sys_reg(cpu->vcpu, HV_REG_SP, &hypervisor->sp));
 
     switch(cpu->vcpu_exit->reason) {
       case HV_EXIT_REASON_EXCEPTION: {
@@ -132,7 +141,7 @@ static t_hypervisor_cpu get_hypervisor_cpu(JNIEnv *env, t_hypervisor hypervisor)
     HYP_ASSERT_SUCCESS(hv_vcpu_set_sys_reg(cpu->vcpu, HV_SYS_REG_ID_AA64MMFR0_EL1, 0x5));
     HYP_ASSERT_SUCCESS(hv_vcpu_set_sys_reg(cpu->vcpu, HV_SYS_REG_ID_AA64MMFR2_EL1, 0x10000));
     // Trap debug access (BRK)
-    HYP_ASSERT_SUCCESS(hv_vcpu_set_trap_debug_exceptions(cpu->vcpu, true));
+    HYP_ASSERT_SUCCESS(hv_vcpu_set_trap_debug_exceptions(cpu->vcpu, false));
     assert(pthread_setspecific(hypervisor->cpu_key, cpu) == 0);
 
     t_vcpus vcpu = lookupVcpu(cpu->vcpu);
@@ -142,17 +151,22 @@ static t_hypervisor_cpu get_hypervisor_cpu(JNIEnv *env, t_hypervisor hypervisor)
     if(hypervisor->is64Bit) {
       vcpu->HV_SYS_REG_HCR_EL2 |= (1LL << HCR_EL2$DC); // set stage 1 as normal memory
     } else {
-      vcpu->HV_SYS_REG_HCR_EL2 = 0x1000LL;
-
-      HYP_ASSERT_SUCCESS(hv_vcpu_set_reg(cpu->vcpu, HV_REG_CPSR, 0x3c4));
-      HYP_ASSERT_SUCCESS(hv_vcpu_set_reg(cpu->vcpu, HV_REG_PC, REG_VBAR_EL1));
-      HYP_ASSERT_SUCCESS(hv_vcpu_set_sys_reg(cpu->vcpu, HV_SYS_REG_ELR_EL1, REG_VBAR_EL1+4));
-      HYP_ASSERT_SUCCESS(hv_vcpu_set_sys_reg(cpu->vcpu, HV_SYS_REG_SPSR_EL1, 0x1c0));
-      assert(cpu_loop(env, hypervisor, cpu) == 0);
+      abort();
     }
 
     return cpu;
   }
+}
+
+/*
+ * Class:     com_github_unidbg_arm_backend_hypervisor_Hypervisor
+ * Method:    getPageSize
+ * Signature: ()I
+ */
+JNIEXPORT jint JNICALL Java_com_github_unidbg_arm_backend_hypervisor_Hypervisor_getPageSize
+  (JNIEnv *env, jclass clazz) {
+  long sz = sysconf(_SC_PAGESIZE);
+  return (jint) sz;
 }
 
 /*
@@ -166,17 +180,11 @@ JNIEXPORT jint JNICALL Java_com_github_unidbg_arm_backend_hypervisor_Hypervisor_
   t_hypervisor_cpu cpu = get_hypervisor_cpu(env, hypervisor);
 
   if(hypervisor->is64Bit) {
-    HYP_ASSERT_SUCCESS(hv_vcpu_set_reg(cpu->vcpu, HV_REG_CPSR, 0x3c0));
+    uint32_t cpsr = PSR_D_BIT | PSR_A_BIT | PSR_I_BIT | PSR_F_BIT | PSR_MODE_EL0t;
+    HYP_ASSERT_SUCCESS(hv_vcpu_set_reg(cpu->vcpu, HV_REG_CPSR, cpsr));
     HYP_ASSERT_SUCCESS(hv_vcpu_set_reg(cpu->vcpu, HV_REG_PC, pc));
   } else {
-    bool thumb = pc & 1;
-    if(thumb) {
-      HYP_ASSERT_SUCCESS(hv_vcpu_set_reg(cpu->vcpu, HV_REG_CPSR, 0x3f0));
-    } else {
-      HYP_ASSERT_SUCCESS(hv_vcpu_set_reg(cpu->vcpu, HV_REG_CPSR, 0x3e0));
-    }
-    HYP_ASSERT_SUCCESS(hv_vcpu_set_reg(cpu->vcpu, HV_REG_CPSR, 0x3c0));
-    HYP_ASSERT_SUCCESS(hv_vcpu_set_reg(cpu->vcpu, HV_REG_PC, (uint32_t) (pc & ~1)));
+    abort();
   }
   return cpu_loop(env, hypervisor, cpu);
 }
@@ -429,8 +437,7 @@ JNIEXPORT jint JNICALL Java_com_github_unidbg_arm_backend_hypervisor_Hypervisor_
 JNIEXPORT jint JNICALL Java_com_github_unidbg_arm_backend_hypervisor_Hypervisor_reg_1set_1sp64
   (JNIEnv *env, jclass clazz, jlong handle, jlong value) {
   t_hypervisor hypervisor = (t_hypervisor) handle;
-  t_hypervisor_cpu cpu = get_hypervisor_cpu(env, hypervisor);
-  HYP_ASSERT_SUCCESS(hv_vcpu_set_sys_reg(cpu->vcpu, HV_REG_SP, value));
+  hypervisor->sp = value;
   return 0;
 }
 
@@ -442,8 +449,7 @@ JNIEXPORT jint JNICALL Java_com_github_unidbg_arm_backend_hypervisor_Hypervisor_
 JNIEXPORT jint JNICALL Java_com_github_unidbg_arm_backend_hypervisor_Hypervisor_reg_1set_1tpidr_1el0
   (JNIEnv *env, jclass clazz, jlong handle, jlong value) {
   t_hypervisor hypervisor = (t_hypervisor) handle;
-  t_hypervisor_cpu cpu = get_hypervisor_cpu(env, hypervisor);
-  HYP_ASSERT_SUCCESS(hv_vcpu_set_sys_reg(cpu->vcpu, HV_SYS_REG_TPIDR_EL0, value));
+  hypervisor->tpidr = value;
   return 0;
 }
 
@@ -455,8 +461,7 @@ JNIEXPORT jint JNICALL Java_com_github_unidbg_arm_backend_hypervisor_Hypervisor_
 JNIEXPORT jint JNICALL Java_com_github_unidbg_arm_backend_hypervisor_Hypervisor_reg_1set_1cpacr_1el1
   (JNIEnv *env, jclass clazz, jlong handle, jlong value) {
   t_hypervisor hypervisor = (t_hypervisor) handle;
-  t_hypervisor_cpu cpu = get_hypervisor_cpu(env, hypervisor);
-  HYP_ASSERT_SUCCESS(hv_vcpu_set_sys_reg(cpu->vcpu, HV_SYS_REG_CPACR_EL1, value));
+  hypervisor->cpacr = value;
   return 0;
 }
 
@@ -494,8 +499,7 @@ JNIEXPORT jint JNICALL Java_com_github_unidbg_arm_backend_hypervisor_Hypervisor_
 JNIEXPORT jint JNICALL Java_com_github_unidbg_arm_backend_hypervisor_Hypervisor_reg_1set_1tpidrro_1el0
   (JNIEnv *env, jclass clazz, jlong handle, jlong value) {
   t_hypervisor hypervisor = (t_hypervisor) handle;
-  t_hypervisor_cpu cpu = get_hypervisor_cpu(env, hypervisor);
-  HYP_ASSERT_SUCCESS(hv_vcpu_set_sys_reg(cpu->vcpu, HV_SYS_REG_TPIDRRO_EL0, value));
+  hypervisor->tpidrro = value;
   return 0;
 }
 
@@ -636,10 +640,7 @@ JNIEXPORT jlong JNICALL Java_com_github_unidbg_arm_backend_hypervisor_Hypervisor
 JNIEXPORT jlong JNICALL Java_com_github_unidbg_arm_backend_hypervisor_Hypervisor_reg_1read_1sp64
   (JNIEnv *env, jclass clazz, jlong handle) {
   t_hypervisor hypervisor = (t_hypervisor) handle;
-  t_hypervisor_cpu cpu = get_hypervisor_cpu(env, hypervisor);
-  uint64_t sp = 0;
-  HYP_ASSERT_SUCCESS(hv_vcpu_get_sys_reg(cpu->vcpu, HV_REG_SP, &sp));
-  return sp;
+  return hypervisor->sp;
 }
 
 /*
@@ -666,7 +667,7 @@ JNIEXPORT jlong JNICALL Java_com_github_unidbg_arm_backend_hypervisor_Hypervisor
   t_hypervisor hypervisor = (t_hypervisor) handle;
   t_hypervisor_cpu cpu = get_hypervisor_cpu(env, hypervisor);
   uint64_t cpsr = 0;
-  HYP_ASSERT_SUCCESS(hv_vcpu_get_reg(cpu->vcpu, HV_REG_CPSR, &cpsr));
+  HYP_ASSERT_SUCCESS(hv_vcpu_get_sys_reg(cpu->vcpu, HV_SYS_REG_SPSR_EL1, &cpsr));
   return cpsr;
 }
 
@@ -678,10 +679,7 @@ JNIEXPORT jlong JNICALL Java_com_github_unidbg_arm_backend_hypervisor_Hypervisor
 JNIEXPORT jlong JNICALL Java_com_github_unidbg_arm_backend_hypervisor_Hypervisor_reg_1read_1cpacr_1el1
   (JNIEnv *env, jclass clazz, jlong handle) {
   t_hypervisor hypervisor = (t_hypervisor) handle;
-  t_hypervisor_cpu cpu = get_hypervisor_cpu(env, hypervisor);
-  uint64_t cpacr = 0;
-  HYP_ASSERT_SUCCESS(hv_vcpu_get_sys_reg(cpu->vcpu, HV_SYS_REG_CPACR_EL1, &cpacr));
-  return cpacr;
+  return hypervisor->cpacr;
 }
 
 /*

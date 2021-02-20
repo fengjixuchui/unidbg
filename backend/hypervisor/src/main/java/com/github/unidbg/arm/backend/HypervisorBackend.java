@@ -19,12 +19,14 @@ public abstract class HypervisorBackend extends FastBackend implements Backend, 
     private static final Log log = LogFactory.getLog(HypervisorBackend.class);
 
     protected final Hypervisor hypervisor;
+    private final int pageSize;
 
     protected static final long REG_VBAR_EL1 = 0xf0000000L;
 
     protected HypervisorBackend(Emulator<?> emulator, Hypervisor hypervisor) throws BackendException {
         super(emulator);
         this.hypervisor = hypervisor;
+        this.pageSize = Hypervisor.getPageSize();
         try {
             this.hypervisor.setHypervisorCallback(this);
         } catch (HypervisorException e) {
@@ -40,20 +42,9 @@ public abstract class HypervisorBackend extends FastBackend implements Backend, 
         ByteBuffer buffer = ByteBuffer.allocate(getPageSize());
         buffer.order(ByteOrder.LITTLE_ENDIAN);
         while (buffer.hasRemaining()) {
-            if (buffer.position() == 0x0) { // Try switch A32
-//                buffer.putInt(0xd4000001); // svc #0
-//                buffer.putInt(0xd4000002); // hvc #0
-                buffer.putInt(0xd69f03e0); // eret
-//                buffer.putInt(0xef000000); // armv7 svc #0
-                buffer.putInt(0xd4000001); // svc #0
-                continue;
-            }
             if (buffer.position() == 0x400) {
                 buffer.putInt(0xd4000002); // hvc #0
-            } else {
-                buffer.putInt(0xd4000003); // smc #0
             }
-//            buffer.putInt(0xd4200000); // brk #0
             if (buffer.hasRemaining()) {
                 buffer.putInt(0xd69f03e0); // eret
             }
@@ -235,6 +226,6 @@ public abstract class HypervisorBackend extends FastBackend implements Backend, 
 
     @Override
     public int getPageSize() {
-        return 0x4000;
+        return pageSize;
     }
 }

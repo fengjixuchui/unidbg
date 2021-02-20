@@ -1,6 +1,5 @@
 package com.github.unidbg.ios;
 
-import com.github.unidbg.AbstractEmulator;
 import com.github.unidbg.Emulator;
 import com.github.unidbg.Module;
 import com.github.unidbg.Symbol;
@@ -15,8 +14,6 @@ import com.github.unidbg.ios.ipa.IpaLoader64;
 import com.github.unidbg.ios.ipa.LoadedIpa;
 import com.github.unidbg.pointer.UnidbgPointer;
 import com.sun.jna.Pointer;
-import org.apache.log4j.Level;
-import org.apache.log4j.Logger;
 
 import java.io.File;
 import java.util.concurrent.Callable;
@@ -24,10 +21,12 @@ import java.util.concurrent.Callable;
 public class IpaLoaderTest implements EmulatorConfigurator {
 
     public void testLoader() throws Exception {
-        Logger.getLogger(AbstractEmulator.class).setLevel(Level.INFO);
         long start = System.currentTimeMillis();
-        IpaLoader ipaLoader = new IpaLoader64(new File("unidbg-ios/src/test/resources/app/TelegramMessenger-5.11.ipa"),
-                new File("target/rootfs/ipa"));
+        File ipa = new File("unidbg-ios/src/test/resources/app/TelegramMessenger-5.11.ipa");
+        if (!ipa.canRead()) {
+            ipa = new File("src/test/resources/app/TelegramMessenger-5.11.ipa");
+        }
+        IpaLoader ipaLoader = new IpaLoader64(ipa, new File("target/rootfs/ipa"));
         ipaLoader.addBackendFactory(new HypervisorFactory(true));
         ipaLoader.addBackendFactory(new DynarmicFactory(true));
         LoadedIpa loader = ipaLoader.load(this);
@@ -37,11 +36,21 @@ public class IpaLoaderTest implements EmulatorConfigurator {
         final Module module = loader.getExecutable();
         emulator.attach().run(new Callable<Void>() {
             @Override
-            public Void call() {
+            public Void call() throws Exception {
                 long start = System.currentTimeMillis();
-                IClassDumper classDumper = ClassDumper.getInstance(emulator);
+                final IClassDumper classDumper = ClassDumper.getInstance(emulator);
                 String objcClass = classDumper.dumpClass("AppDelegate");
-                System.out.println(objcClass);
+                System.out.println("[" + Thread.currentThread().getName() + "]\n" + objcClass);
+
+                Thread thread = new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        String objcClass = classDumper.dumpClass("NSDate");
+                        System.out.println("[" + Thread.currentThread().getName() + "]\n" + objcClass);
+                    }
+                });
+                thread.start();
+                thread.join();
 
                 Symbol _TelegramCoreVersionString = module.findSymbolByName("_TelegramCoreVersionString");
                 Pointer pointer = UnidbgPointer.pointer(emulator, _TelegramCoreVersionString.getAddress());
