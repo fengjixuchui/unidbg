@@ -6,6 +6,7 @@ import com.github.unidbg.arm.ARMEmulator;
 import com.github.unidbg.arm.HookStatus;
 import com.github.unidbg.arm.backend.DynarmicFactory;
 import com.github.unidbg.arm.backend.HypervisorFactory;
+import com.github.unidbg.arm.backend.KvmFactory;
 import com.github.unidbg.file.ios.DarwinFileIO;
 import com.github.unidbg.hook.HookContext;
 import com.github.unidbg.hook.ReplaceCallback;
@@ -33,6 +34,7 @@ public class ClassDump64Test extends EmulatorTest<ARMEmulator<DarwinFileIO>> {
         builder.setRootDir(new File("target/rootfs/classdump"));
         builder.addBackendFactory(new HypervisorFactory(true));
         builder.addBackendFactory(new DynarmicFactory(true));
+        builder.addBackendFactory(new KvmFactory(true));
         return builder.build();
     }
 
@@ -72,7 +74,7 @@ public class ClassDump64Test extends EmulatorTest<ARMEmulator<DarwinFileIO>> {
         System.out.println(objcClass);
 
         assertTrue(oClassDump.getMeta().isMetaClass());
-        System.out.println("className=" + oClassDump.getName() + ", metaClassName=" + oClassDump.getMeta().getName());
+        System.out.println("[" + emulator.getBackend() + "]className=" + oClassDump.getName() + ", metaClassName=" + oClassDump.getMeta().getName());
 
         ObjcObject str = oClassDump.callObjc("my_dump_class:", "NSTimeZone");
         System.out.println(str.getDescription());

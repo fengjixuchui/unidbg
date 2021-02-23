@@ -155,6 +155,9 @@ public class KvmBackend32 extends KvmBackend {
                 case ArmConst.UC_ARM_REG_C1_C0_2:
                     kvm.reg_set_cpacr_el1(value.longValue());
                     break;
+                case ArmConst.UC_ARM_REG_CPSR:
+                    kvm.reg_set_nzcv(value.longValue() & 0xffffffffL);
+                    break;
                 default:
                     throw new KvmException("regId=" + regId);
             }
@@ -179,18 +182,7 @@ public class KvmBackend32 extends KvmBackend {
     }
 
     @Override
-    public Unicorn.UnHook debugger_add(DebugHook callback, long begin, long end, Object user_data) throws BackendException {
-        return null;
-    }
-
-    @Override
-    public void hook_add_new(ReadHook callback, long begin, long end, Object user_data) throws BackendException {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void hook_add_new(WriteHook callback, long begin, long end, Object user_data) throws BackendException {
-        throw new UnsupportedOperationException();
+    public void debugger_add(DebugHook callback, long begin, long end, Object user_data) throws BackendException {
     }
 
     @Override
