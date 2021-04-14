@@ -1,6 +1,10 @@
 package com.github.unidbg.arm;
 
-import capstone.*;
+import capstone.Arm;
+import capstone.Arm64;
+import capstone.Arm64_const;
+import capstone.Arm_const;
+import capstone.Capstone;
 import com.github.unidbg.Alignment;
 import com.github.unidbg.Emulator;
 import com.github.unidbg.Module;
@@ -1050,7 +1054,23 @@ public class ARM {
         sb.append(" [0x").append(Long.toHexString(addr)).append(']');
         try {
             if (is64Bit) {
-                long value = pointer.getLong(0);
+                long value;
+                switch (bytesRead) {
+                    case 1:
+                        value = pointer.getByte(0) & 0xff;
+                        break;
+                    case 2:
+                        value = pointer.getShort(0) & 0xffff;
+                        break;
+                    case 4:
+                        value = pointer.getInt(0);
+                        break;
+                    case 8:
+                        value = pointer.getLong(0);
+                        break;
+                    default:
+                        throw new IllegalStateException("bytesRead=" + bytesRead);
+                }
                 sb.append(" => 0x").append(Long.toHexString(value));
                 if (value < 0) {
                     sb.append(" (-0x").append(Long.toHexString(-value)).append(')');
@@ -1093,19 +1113,32 @@ public class ARM {
 
         int[] regArgs = ARM.getRegArgs(emulator);
         List<Number> argList = new ArrayList<>(arguments.length * 2);
-        int index = 0;
+        int regVector = Arm64Const.UC_ARM64_REG_Q0;
         for (Number arg : arguments) {
             if (emulator.is64Bit()) {
+                if (arg instanceof Float) {
+                    ByteBuffer buffer = ByteBuffer.allocate(16);
+                    buffer.order(ByteOrder.LITTLE_ENDIAN);
+                    buffer.putFloat((Float) arg);
+                    emulator.getBackend().reg_write_vector(regVector++, buffer.array());
+                    continue;
+                }
+                if (arg instanceof Double) {
+                    ByteBuffer buffer = ByteBuffer.allocate(16);
+                    buffer.order(ByteOrder.LITTLE_ENDIAN);
+                    buffer.putDouble((Double) arg);
+                    emulator.getBackend().reg_write_vector(regVector++, buffer.array());
+                    continue;
+                }
                 argList.add(arg);
                 continue;
             }
             if (arg instanceof Long) {
                 if (log.isDebugEnabled()) {
-                    log.debug("initLongArgs index=" + index + ", length=" + regArgs.length, new Exception("initArgs long=" + arg));
+                    log.debug("initLongArgs size=" + argList.size() + ", length=" + regArgs.length, new Exception("initArgs long=" + arg));
                 }
-                if (padding && index == regArgs.length - 1) {
+                if (padding && argList.size() % 2 != 0) {
                     argList.add(0);
-                    index++;
                 }
                 ByteBuffer buffer = ByteBuffer.allocate(8);
                 buffer.order(ByteOrder.LITTLE_ENDIAN);
@@ -1115,14 +1148,12 @@ public class ARM {
                 int v2 = buffer.getInt();
                 argList.add(v1);
                 argList.add(v2);
-                index += 2;
             } else if (arg instanceof Double) {
                 if (log.isDebugEnabled()) {
-                    log.debug("initDoubleArgs index=" + index + ", length=" + regArgs.length, new Exception("initArgs double=" + arg));
+                    log.debug("initDoubleArgs size=" + argList.size() + ", length=" + regArgs.length, new Exception("initArgs double=" + arg));
                 }
-                if (padding && index == regArgs.length - 1) {
+                if (padding && argList.size() % 2 != 0) {
                     argList.add(0);
-                    index++;
                 }
                 ByteBuffer buffer = ByteBuffer.allocate(8);
                 buffer.order(ByteOrder.LITTLE_ENDIAN);
@@ -1130,20 +1161,17 @@ public class ARM {
                 buffer.flip();
                 argList.add(buffer.getInt());
                 argList.add(buffer.getInt());
-                index += 2;
             } else if (arg instanceof Float) {
                 if (log.isDebugEnabled()) {
-                    log.debug("initFloatArgs index=" + index + ", length=" + regArgs.length, new Exception("initArgs float=" + arg));
+                    log.debug("initFloatArgs size=" + argList.size() + ", length=" + regArgs.length, new Exception("initArgs float=" + arg));
                 }
                 ByteBuffer buffer = ByteBuffer.allocate(4);
                 buffer.order(ByteOrder.LITTLE_ENDIAN);
                 buffer.putFloat((Float) arg);
                 buffer.flip();
                 argList.add(buffer.getInt());
-                index++;
             } else {
                 argList.add(arg);
-                index++;
             }
         }
         final Arguments args = new Arguments(memory, argList.toArray(new Number[0]));

@@ -2,13 +2,14 @@ package com.github.unidbg.arm.backend;
 
 import com.github.unidbg.Emulator;
 import com.github.unidbg.arm.ARMEmulator;
-import com.github.unidbg.arm.backend.hypervisor.*;
+import com.github.unidbg.arm.backend.hypervisor.Hypervisor;
+import com.github.unidbg.arm.backend.hypervisor.HypervisorCallback;
+import com.github.unidbg.arm.backend.hypervisor.HypervisorException;
 import com.github.unidbg.pointer.UnidbgPointer;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import unicorn.Arm64Const;
-import unicorn.Unicorn;
 import unicorn.UnicornConst;
 
 import java.nio.ByteBuffer;
@@ -130,7 +131,7 @@ public abstract class HypervisorBackend extends FastBackend implements Backend, 
     }
 
     @Override
-    public Unicorn.UnHook hook_add_new(CodeHook callback, long begin, long end, Object user_data) throws BackendException {
+    public void hook_add_new(CodeHook callback, long begin, long end, Object user_data) throws BackendException {
         throw new UnsupportedOperationException();
     }
 
@@ -139,12 +140,12 @@ public abstract class HypervisorBackend extends FastBackend implements Backend, 
     }
 
     @Override
-    public Unicorn.UnHook hook_add_new(ReadHook callback, long begin, long end, Object user_data) throws BackendException {
+    public void hook_add_new(ReadHook callback, long begin, long end, Object user_data) throws BackendException {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public Unicorn.UnHook hook_add_new(WriteHook callback, long begin, long end, Object user_data) throws BackendException {
+    public void hook_add_new(WriteHook callback, long begin, long end, Object user_data) throws BackendException {
         throw new UnsupportedOperationException();
     }
 
@@ -175,7 +176,7 @@ public abstract class HypervisorBackend extends FastBackend implements Backend, 
     }
 
     @Override
-    public Unicorn.UnHook hook_add_new(BlockHook callback, long begin, long end, Object user_data) throws BackendException {
+    public void hook_add_new(BlockHook callback, long begin, long end, Object user_data) throws BackendException {
         throw new UnsupportedOperationException();
     }
 

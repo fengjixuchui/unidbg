@@ -33,20 +33,19 @@ public interface Backend {
     void setSingleStep(int singleStep);
     void setFastDebug(boolean fastDebug);
 
-    Unicorn.UnHook hook_add_new(CodeHook callback, long begin, long end, Object user_data) throws BackendException;
+    void hook_add_new(CodeHook callback, long begin, long end, Object user_data) throws BackendException;
 
     void debugger_add(DebugHook callback, long begin, long end, Object user_data) throws BackendException;
 
-    Unicorn.UnHook hook_add_new(ReadHook callback, long begin, long end, Object user_data) throws BackendException;
+    void hook_add_new(ReadHook callback, long begin, long end, Object user_data) throws BackendException;
 
-    Unicorn.UnHook hook_add_new(WriteHook callback, long begin, long end, Object user_data) throws BackendException;
+    void hook_add_new(WriteHook callback, long begin, long end, Object user_data) throws BackendException;
 
     void hook_add_new(EventMemHook callback, int type, Object user_data) throws BackendException;
 
     void hook_add_new(InterruptHook callback, Object user_data) throws BackendException;
 
-    @SuppressWarnings("unused")
-    Unicorn.UnHook hook_add_new(BlockHook callback, long begin, long end, Object user_data) throws BackendException;
+    void hook_add_new(BlockHook callback, long begin, long end, Object user_data) throws BackendException;
 
     void emu_start(long begin, long until, long timeout, long count) throws BackendException;
 

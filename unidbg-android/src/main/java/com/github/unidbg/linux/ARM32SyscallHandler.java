@@ -16,7 +16,13 @@ import com.github.unidbg.file.IOResolver;
 import com.github.unidbg.file.linux.AndroidFileIO;
 import com.github.unidbg.file.linux.IOConstants;
 import com.github.unidbg.linux.android.AndroidResolver;
-import com.github.unidbg.linux.file.*;
+import com.github.unidbg.linux.file.ByteArrayFileIO;
+import com.github.unidbg.linux.file.DriverFileIO;
+import com.github.unidbg.linux.file.LocalAndroidUdpSocket;
+import com.github.unidbg.linux.file.LocalSocketIO;
+import com.github.unidbg.linux.file.SocketIO;
+import com.github.unidbg.linux.file.TcpSocket;
+import com.github.unidbg.linux.file.UdpSocket;
 import com.github.unidbg.linux.struct.Stat32;
 import com.github.unidbg.linux.struct.SysInfo32;
 import com.github.unidbg.memory.Memory;
@@ -1885,9 +1891,12 @@ public class ARM32SyscallHandler extends AndroidSyscallHandler {
                 throw new BackendException();
             }
 
-            log.warn(msg);
-            emulator.getMemory().setErrno(UnixEmulator.ENOENT);
-            return -1;
+            int fd = open(emulator, pathname, oflags);
+            if (fd == -1) {
+                emulator.getMemory().setErrno(UnixEmulator.ENOENT);
+                log.info(msg);
+            }
+            return fd;
         }
     }
 

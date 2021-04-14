@@ -15,7 +15,13 @@ import org.apache.commons.io.IOUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
-import java.io.*;
+import java.io.BufferedOutputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.RandomAccessFile;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 
@@ -230,6 +236,11 @@ public class SimpleFileIO extends BaseDarwinFileIO implements FileIO {
     @Override
     public int listxattr(Pointer namebuf, int size, int options) {
         return listxattr(file, namebuf, size);
+    }
+
+    @Override
+    public int setxattr(String name, byte[] data) {
+        return setxattr(file, name, data);
     }
 
     @Override

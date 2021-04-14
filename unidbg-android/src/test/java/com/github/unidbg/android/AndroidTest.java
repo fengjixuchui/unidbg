@@ -1,13 +1,21 @@
 package com.github.unidbg.android;
 
-import com.github.unidbg.*;
+import com.github.unidbg.AndroidEmulator;
+import com.github.unidbg.Emulator;
+import com.github.unidbg.LibraryResolver;
+import com.github.unidbg.Module;
 import com.github.unidbg.arm.backend.BackendFactory;
 import com.github.unidbg.arm.backend.DynarmicFactory;
 import com.github.unidbg.file.linux.AndroidFileIO;
 import com.github.unidbg.linux.ARM32SyscallHandler;
 import com.github.unidbg.linux.android.AndroidARMEmulator;
 import com.github.unidbg.linux.android.AndroidResolver;
-import com.github.unidbg.linux.android.dvm.*;
+import com.github.unidbg.linux.android.dvm.AbstractJni;
+import com.github.unidbg.linux.android.dvm.BaseVM;
+import com.github.unidbg.linux.android.dvm.DalvikModule;
+import com.github.unidbg.linux.android.dvm.DvmClass;
+import com.github.unidbg.linux.android.dvm.VM;
+import com.github.unidbg.linux.android.dvm.VarArg;
 import com.github.unidbg.linux.struct.Dirent;
 import com.github.unidbg.memory.Memory;
 import com.github.unidbg.memory.SvcMemory;
@@ -26,6 +34,7 @@ public class AndroidTest extends AbstractJni {
 
     private final AndroidEmulator emulator;
     private final Module module;
+    private final DvmClass cJniTest;
 
     private static class MyARMSyscallHandler extends ARM32SyscallHandler {
         private MyARMSyscallHandler(SvcMemory svcMemory) {
@@ -37,7 +46,7 @@ public class AndroidTest extends AbstractJni {
         }
     }
 
-    private AndroidTest() throws IOException {
+    private AndroidTest() {
         final File executable = new File("unidbg-android/src/test/native/android/libs/armeabi-v7a/test");
         emulator = new AndroidARMEmulator(executable.getName(),
                 new File("target/rootfs"),
@@ -59,6 +68,7 @@ public class AndroidTest extends AbstractJni {
         vm.setJni(this);
         DalvikModule dm = vm.loadLibrary(new File("unidbg-android/src/test/native/android/libs/armeabi-v7a/libnative.so"), true);
         dm.callJNI_OnLoad(emulator);
+        this.cJniTest = vm.resolveClass("com/github/unidbg/android/JniTest");
 
         {
             Pointer pointer = memory.allocateStack(0x100);
@@ -85,6 +95,11 @@ public class AndroidTest extends AbstractJni {
     }
 
     private void test() {
+        cJniTest.callStaticJniMethod(emulator, "testJni(Ljava/lang/String;JIDZSFDBJF)V",
+                getClass().getName(), 0x123456789abcdefL,
+                0x789a, 0.12345D, true, 0x123, 0.456f, 0.789123D, (byte) 0x7f,
+                0x89abcdefL, 0.123f);
+
 //        Logger.getLogger("com.github.unidbg.linux.ARM32SyscallHandler").setLevel(Level.DEBUG);
         System.err.println("exit code: " + module.callEntry(emulator));
     }

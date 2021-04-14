@@ -1,13 +1,21 @@
 package com.github.unidbg.arm;
 
 import capstone.Capstone;
-import com.github.unidbg.*;
+import com.github.unidbg.AssemblyCodeDumper;
+import com.github.unidbg.Emulator;
+import com.github.unidbg.Family;
+import com.github.unidbg.Module;
+import com.github.unidbg.Symbol;
+import com.github.unidbg.TraceMemoryHook;
+import com.github.unidbg.Utils;
 import com.github.unidbg.arm.backend.Backend;
+import com.github.unidbg.arm.backend.BlockHook;
 import com.github.unidbg.arm.backend.ReadHook;
 import com.github.unidbg.arm.backend.WriteHook;
 import com.github.unidbg.debugger.BreakPoint;
 import com.github.unidbg.debugger.BreakPointCallback;
 import com.github.unidbg.debugger.DebugListener;
+import com.github.unidbg.debugger.DebugRunnable;
 import com.github.unidbg.debugger.Debugger;
 import com.github.unidbg.memory.MemRegion;
 import com.github.unidbg.memory.Memory;
@@ -29,11 +37,24 @@ import unicorn.ArmConst;
 import unicorn.Unicorn;
 import unicorn.UnicornConst;
 
-import java.io.*;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.PrintStream;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.*;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Date;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -50,17 +71,18 @@ public abstract class AbstractARMDebugger implements Debugger {
         this.emulator = emulator;
     }
 
-    private Unicorn.UnHook unHook;
+    private final List<Unicorn.UnHook> unHookList = new ArrayList<>();
 
     @Override
     public void onAttach(Unicorn.UnHook unHook) {
-        this.unHook = unHook;
+        unHookList.add(unHook);
     }
 
     @Override
     public void detach() {
-        if (unHook != null) {
-            unHook.unhook();
+        for (Iterator<Unicorn.UnHook> iterator = unHookList.iterator(); iterator.hasNext(); ) {
+            iterator.next().unhook();
+            iterator.remove();
         }
     }
 
@@ -145,7 +167,7 @@ public abstract class AbstractARMDebugger implements Debugger {
         try {
             if (listener == null || listener.canDebug(emulator, new CodeHistory(address, size, ARM.isThumb(backend)))) {
                 if (traceHook != null) {
-                    traceHook.unhook();
+                    traceHook.detach();
                     traceHook = null;
                 }
                 if (traceHookRedirectStream != null) {
@@ -153,7 +175,7 @@ public abstract class AbstractARMDebugger implements Debugger {
                     traceHookRedirectStream = null;
                 }
                 if (traceRead != null) {
-                    traceRead.unhook();
+                    traceRead.detach();
                     traceRead = null;
                 }
                 if (traceReadRedirectStream != null) {
@@ -161,7 +183,7 @@ public abstract class AbstractARMDebugger implements Debugger {
                     traceReadRedirectStream = null;
                 }
                 if (traceWrite != null) {
-                    traceWrite.unhook();
+                    traceWrite.detach();
                     traceWrite = null;
                 }
                 if (traceWriteRedirectStream != null) {
@@ -183,6 +205,17 @@ public abstract class AbstractARMDebugger implements Debugger {
     @Override
     public boolean isDebugging() {
         return debugging;
+    }
+
+    private boolean blockHooked;
+    private boolean breakNextBlock;
+
+    @Override
+    public void hookBlock(Backend backend, long address, int size, Object user) {
+        if (breakNextBlock) {
+            onBreak(backend, address, size, user);
+            breakNextBlock = false;
+        }
     }
 
     @Override
@@ -232,25 +265,25 @@ public abstract class AbstractARMDebugger implements Debugger {
 
     private String breakMnemonic;
 
-    protected abstract void loop(Emulator<?> emulator, long address, int size, Callable<?> callable) throws Exception;
+    protected abstract void loop(Emulator<?> emulator, long address, int size, DebugRunnable<?> runnable) throws Exception;
 
     protected boolean callbackRunning;
 
     @Override
-    public <T> T run(Callable<T> callable) throws Exception {
-        if (callable == null) {
+    public <T> T run(DebugRunnable<T> runnable) throws Exception {
+        if (runnable == null) {
             throw new NullPointerException();
         }
         T ret;
         try {
             callbackRunning = true;
-            ret = callable.call();
+            ret = runnable.runWithArgs(null);
         } finally {
             callbackRunning = false;
         }
         try {
             debugging = true;
-            loop(emulator, -1, 0, callable);
+            loop(emulator, -1, 0, runnable);
         } finally {
             debugging = false;
         }
@@ -385,18 +418,18 @@ public abstract class AbstractARMDebugger implements Debugger {
         return pointers;
     }
 
-    private Unicorn.UnHook traceHook;
+    private AssemblyCodeDumper traceHook;
     private PrintStream traceHookRedirectStream;
-    private Unicorn.UnHook traceRead;
+    private TraceMemoryHook traceRead;
     private PrintStream traceReadRedirectStream;
-    private Unicorn.UnHook traceWrite;
+    private TraceMemoryHook traceWrite;
     private PrintStream traceWriteRedirectStream;
 
-    final boolean handleCommon(Backend backend, String line, long address, int size, long nextAddress, Callable<?> callable) throws Exception {
+    final boolean handleCommon(Backend backend, String line, long address, int size, long nextAddress, DebugRunnable<?> runnable) throws Exception {
         if ("exit".equals(line) || "quit".equals(line)) { // continue
             return true;
         }
-        if (callable == null || callbackRunning) {
+        if (runnable == null || callbackRunning) {
             if ("c".equals(line)) { // continue
                 return true;
             }
@@ -404,7 +437,7 @@ public abstract class AbstractARMDebugger implements Debugger {
             if ("c".equals(line)) {
                 try {
                     callbackRunning = true;
-                    callable.call();
+                    runnable.runWithArgs(null);
                     return false;
                 } finally {
                     callbackRunning = false;
@@ -481,7 +514,7 @@ public abstract class AbstractARMDebugger implements Debugger {
         if (line.startsWith("traceRead")) { // start trace memory read
             Pattern pattern = Pattern.compile("traceRead\\s+(\\w+)\\s+(\\w+)");
             Matcher matcher = pattern.matcher(line);
-            TraceMemoryHook memoryHook = new TraceMemoryHook(true);
+            traceRead = new TraceMemoryHook(true);
             long begin, end;
             if (matcher.find()) {
                 begin = Utils.parseNumber(matcher.group(1));
@@ -489,27 +522,32 @@ public abstract class AbstractARMDebugger implements Debugger {
                 if (begin >= end) {
                     System.out.printf("Set trace all memory read success.%n");
                 } else {
-                    File traceFile = new File(String.format("target/traceRead_0x%x-0x%x.txt", begin, end));
-                    if (!traceFile.exists() && !traceFile.createNewFile()) {
-                        throw new IllegalStateException("createNewFile: " + traceFile);
+                    boolean needTraceFile = end - begin > 0x1000;
+                    if (needTraceFile) {
+                        File traceFile = new File(String.format("target/traceRead_0x%x-0x%x.txt", begin, end));
+                        if (!traceFile.exists() && !traceFile.createNewFile()) {
+                            throw new IllegalStateException("createNewFile: " + traceFile);
+                        }
+                        traceReadRedirectStream = new PrintStream(new FileOutputStream(traceFile), true);
+                        traceReadRedirectStream.printf("[%s]Start traceRead: 0x%x-0x%x%n", new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()), begin, end);
+                        traceRead.setRedirect(traceReadRedirectStream);
+                        System.out.printf("Set trace 0x%x->0x%x memory read success with trace file: %s.%n", begin, end, traceFile);
+                    } else {
+                        System.out.printf("Set trace 0x%x->0x%x memory read success.%n", begin, end);
                     }
-                    traceReadRedirectStream = new PrintStream(new FileOutputStream(traceFile), true);
-                    traceReadRedirectStream.printf("Start traceRead: 0x%x-0x%x%n", begin, end);
-                    memoryHook.setRedirect(traceReadRedirectStream);
-                    System.out.printf("Set trace 0x%x->0x%x memory read success with trace file: %s.%n", begin, end, traceFile);
                 }
             } else {
                 begin = 1;
                 end = 0;
                 System.out.println("Set trace all memory read success");
             }
-            traceRead = emulator.getBackend().hook_add_new((ReadHook) memoryHook, begin, end, emulator);
+            emulator.getBackend().hook_add_new((ReadHook) traceRead, begin, end, emulator);
             return false;
         }
         if (line.startsWith("traceWrite")) { // start trace memory write
             Pattern pattern = Pattern.compile("traceWrite\\s+(\\w+)\\s+(\\w+)");
             Matcher matcher = pattern.matcher(line);
-            TraceMemoryHook memoryHook = new TraceMemoryHook(false);
+            traceWrite = new TraceMemoryHook(false);
             long begin, end;
             if (matcher.find()) {
                 begin = Utils.parseNumber(matcher.group(1));
@@ -517,28 +555,33 @@ public abstract class AbstractARMDebugger implements Debugger {
                 if (begin >= end) {
                     System.out.printf("Set trace all memory write success.%n");
                 } else {
-                    File traceFile = new File(String.format("target/traceWrite_0x%x-0x%x.txt", begin, end));
-                    if (!traceFile.exists() && !traceFile.createNewFile()) {
-                        throw new IllegalStateException("createNewFile: " + traceFile);
+                    boolean needTraceFile = end - begin > 0x1000;
+                    if (needTraceFile) {
+                        File traceFile = new File(String.format("target/traceWrite_0x%x-0x%x.txt", begin, end));
+                        if (!traceFile.exists() && !traceFile.createNewFile()) {
+                            throw new IllegalStateException("createNewFile: " + traceFile);
+                        }
+                        traceWriteRedirectStream = new PrintStream(new FileOutputStream(traceFile), true);
+                        traceWriteRedirectStream.printf("[%s]Start traceWrite: 0x%x-0x%x%n", new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()), begin, end);
+                        traceWrite.setRedirect(traceWriteRedirectStream);
+                        System.out.printf("Set trace 0x%x->0x%x memory write success with trace file: %s.%n", begin, end, traceFile);
+                    } else {
+                        System.out.printf("Set trace 0x%x->0x%x memory write success.%n", begin, end);
                     }
-                    traceWriteRedirectStream = new PrintStream(new FileOutputStream(traceFile), true);
-                    traceWriteRedirectStream.printf("Start traceWrite: 0x%x-0x%x%n", begin, end);
-                    memoryHook.setRedirect(traceWriteRedirectStream);
-                    System.out.printf("Set trace 0x%x->0x%x memory write success with trace file: %s.%n", begin, end, traceFile);
                 }
             } else {
                 begin = 1;
                 end = 0;
                 System.out.println("Set trace all memory write success");
             }
-            traceWrite = emulator.getBackend().hook_add_new((WriteHook) memoryHook, begin, end, emulator);
+            emulator.getBackend().hook_add_new((WriteHook) traceWrite, begin, end, emulator);
             return false;
         }
         if (line.startsWith("trace")) { // start trace instructions
             Memory memory = emulator.getMemory();
             Pattern pattern = Pattern.compile("trace\\s+(\\w+)\\s+(\\w+)");
             Matcher matcher = pattern.matcher(line);
-            AssemblyCodeDumper codeHook = new AssemblyCodeDumper(emulator);
+            traceHook = new AssemblyCodeDumper(emulator);
             long begin, end;
             if (matcher.find()) {
                 begin = Utils.parseNumber(matcher.group(1));
@@ -569,7 +612,8 @@ public abstract class AbstractARMDebugger implements Debugger {
                                 throw new IllegalStateException("createNewFile: " + outFile);
                             }
                             traceHookRedirectStream = new PrintStream(new FileOutputStream(outFile), true);
-                            codeHook.setRedirect(traceHookRedirectStream);
+                            traceHookRedirectStream.printf("[%s]Start trace %s", new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()), module == null ? "all" : module);
+                            traceHook.setRedirect(traceHookRedirectStream);
                             traceFile = outFile;
                         } catch (IOException e) {
                             System.err.println("Set trace redirect out file failed: " + outFile);
@@ -581,8 +625,8 @@ public abstract class AbstractARMDebugger implements Debugger {
                 end = module == null ? 0 : (module.base + module.size);
                 System.out.println("Set trace " + (module == null ? "all" : module) + " instructions success" + (traceFile == null ? "." : (" with trace file: " + traceFile)));
             }
-            codeHook.initialize(begin, end, null);
-            traceHook = emulator.getBackend().hook_add_new(codeHook, begin, end, emulator);
+            traceHook.initialize(begin, end, null);
+            emulator.getBackend().hook_add_new(traceHook, begin, end, emulator);
             return false;
         }
         if (line.startsWith("vm")) {
@@ -651,6 +695,14 @@ public abstract class AbstractARMDebugger implements Debugger {
         }
         if ("s".equals(line) || "si".equals(line)) {
             setSingleStep(1);
+            return true;
+        }
+        if ("nb".equals(line)) {
+            if (!blockHooked) {
+                blockHooked = true;
+                emulator.getBackend().hook_add_new((BlockHook) this, 1, 0, emulator);
+            }
+            breakNextBlock = true;
             return true;
         }
         if (line.startsWith("s")) {
