@@ -31,7 +31,11 @@ public class SimpleARMUnwinder extends Unwinder {
     }
 
     private Frame initFrame(Emulator<?> emulator) {
-        UnidbgPointer ip = UnidbgPointer.register(emulator, ArmConst.UC_ARM_REG_LR);
+        UnidbgPointer ip = UnidbgPointer.register(emulator, ArmConst.UC_ARM_REG_PC);
+        boolean isThumb = ARM.isThumb(emulator.getBackend());
+        if (isThumb) {
+            ip = ip.share(1, 0);
+        }
         UnidbgPointer fp = UnidbgPointer.register(emulator, ArmConst.UC_ARM_REG_R7);
         return createFrame(ip, fp);
     }

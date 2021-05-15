@@ -257,6 +257,9 @@ public class ARM32SyscallHandler extends AndroidSyscallHandler {
                 case 147:
                     backend.reg_write(ArmConst.UC_ARM_REG_R0, getsid(emulator));
                     return;
+                case 150:
+                    backend.reg_write(ArmConst.UC_ARM_REG_R0, mlock(emulator));
+                    return;
                 case 162:
                     backend.reg_write(ArmConst.UC_ARM_REG_R0, nanosleep(emulator));
                     return;
@@ -415,6 +418,9 @@ public class ARM32SyscallHandler extends AndroidSyscallHandler {
                 case 348:
                     backend.reg_write(ArmConst.UC_ARM_REG_R0, utimensat(backend, emulator));
                     return;
+                case 356:
+                    backend.reg_write(ArmConst.UC_ARM_REG_R0, eventfd2(emulator));
+                    return;
                 case 358:
                     backend.reg_write(ArmConst.UC_ARM_REG_R0, dup3(emulator));
                     return;
@@ -443,11 +449,21 @@ public class ARM32SyscallHandler extends AndroidSyscallHandler {
             return;
         }
 
-        log.warn("handleInterrupt intno=" + intno + ", NR=" + NR + ", svcNumber=0x" + Integer.toHexString(swi) + ", PC=" + pc + ", syscall=" + syscall, exception);
+        log.warn("handleInterrupt intno=" + intno + ", NR=" + NR + ", svcNumber=0x" + Integer.toHexString(swi) + ", PC=" + pc + ", LR=" + emulator.getContext().getLRPointer() + ", syscall=" + syscall, exception);
 
         if (exception instanceof RuntimeException) {
             throw (RuntimeException) exception;
         }
+    }
+
+    private int mlock(Emulator<?> emulator) {
+        RegisterContext context = emulator.getContext();
+        Pointer addr = context.getPointerArg(0);
+        int len = context.getIntArg(1);
+        if (log.isDebugEnabled()) {
+            log.debug("mlock addr=" + addr + ", len=" + len);
+        }
+        return 0;
     }
 
     private int getrandom(Emulator<?> emulator) {
@@ -1661,6 +1677,7 @@ public class ARM32SyscallHandler extends AndroidSyscallHandler {
 
     private static final int CLOCK_REALTIME = 0;
     private static final int CLOCK_MONOTONIC = 1;
+    private static final int CLOCK_THREAD_CPUTIME_ID = 3;
     private static final int CLOCK_MONOTONIC_RAW = 4;
     private static final int CLOCK_MONOTONIC_COARSE = 6;
     private static final int CLOCK_BOOTTIME = 7;
@@ -1684,6 +1701,10 @@ public class ARM32SyscallHandler extends AndroidSyscallHandler {
             case CLOCK_BOOTTIME:
                 tp.setInt(0, (int) tv_sec);
                 tp.setInt(4, (int) tv_nsec);
+                return 0;
+            case CLOCK_THREAD_CPUTIME_ID:
+                tp.setInt(0, 0);
+                tp.setInt(4, 1);
                 return 0;
         }
         throw new UnsupportedOperationException("clk_id=" + clk_id);

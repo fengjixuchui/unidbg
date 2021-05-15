@@ -1,7 +1,6 @@
 package com.github.unidbg.unwind;
 
 import com.github.unidbg.Emulator;
-import com.github.unidbg.Family;
 import com.github.unidbg.Module;
 import com.github.unidbg.Symbol;
 import com.github.unidbg.arm.AbstractARMDebugger;
@@ -11,6 +10,8 @@ import com.github.zhkl0228.demumble.DemanglerFactory;
 import com.github.zhkl0228.demumble.GccDemangler;
 
 public abstract class Unwinder {
+
+    public static final int SYMBOL_SIZE = 0x1000;
 
     protected final Emulator<?> emulator;
 
@@ -38,30 +39,36 @@ public abstract class Unwinder {
                 return;
             }
 
-            Module module = AbstractARMDebugger.findModuleByAddress(emulator, frame.ip.peer);
             hasTrace = true;
-            StringBuilder sb = new StringBuilder();
-            if (module != null) {
-                sb.append(String.format(getBaseFormat(), module.base));
-                sb.append(String.format("[%" + maxLengthSoName.length() + "s]", module.name));
-                sb.append(String.format("[0x%0" + Long.toHexString(memory.getMaxSizeOfLibrary()).length() + "x]", frame.ip.peer - module.base));
-
-                Symbol symbol = emulator.getFamily() == Family.iOS ? null : module.findNearestSymbolByAddress(frame.ip.peer);
-                if (symbol != null) {
-                    GccDemangler demangler = DemanglerFactory.createDemangler();
-                    sb.append(" ").append(demangler.demangle(symbol.getName())).append(" + 0x").append(Long.toHexString(frame.ip.peer - symbol.getAddress()));
-                }
-            } else {
-                sb.append(String.format(getBaseFormat(), 0));
-                sb.append(String.format("[%" + maxLengthSoName.length() + "s]", "0x" + Long.toHexString(frame.ip.peer)));
-                sb.append(String.format("[0x%0" + Long.toHexString(memory.getMaxSizeOfLibrary()).length() + "x]", frame.ip.peer - 0xfffe0000L));
-            }
-            System.out.println(sb);
+            printFrameElement(maxLengthSoName, memory, frame.ip);
         }
 
         if (!hasTrace) {
             System.err.println("Decode backtrace failed.");
         }
+    }
+
+    private void printFrameElement(String maxLengthSoName, Memory memory, UnidbgPointer ip) {
+        Module module = AbstractARMDebugger.findModuleByAddress(emulator, ip.peer);
+        StringBuilder sb = new StringBuilder();
+        if (module != null) {
+            sb.append(String.format(getBaseFormat(), module.base));
+            sb.append(String.format("[%" + maxLengthSoName.length() + "s]", module.name));
+            sb.append(String.format("[0x%0" + Long.toHexString(memory.getMaxSizeOfLibrary()).length() + "x]", ip.peer - module.base));
+
+            Symbol symbol = module.findClosestSymbolByAddress(ip.peer, false);
+            if (symbol != null && ip.peer - symbol.getAddress() <= SYMBOL_SIZE) {
+                GccDemangler demangler = DemanglerFactory.createDemangler();
+                sb.append(" ").append(demangler.demangle(symbol.getName())).append(" + 0x").append(Long.toHexString(ip.peer - symbol.getAddress()));
+            }
+        } else {
+            sb.append(String.format(getBaseFormat(), 0));
+            sb.append(String.format("[%" + maxLengthSoName.length() + "s]", "0x" + Long.toHexString(ip.peer)));
+            if (ip.peer >= 0xfffe0000L) {
+                sb.append(String.format("[0x%0" + Long.toHexString(memory.getMaxSizeOfLibrary()).length() + "x]", ip.peer - 0xfffe0000L));
+            }
+        }
+        System.out.println(sb);
     }
 
 }

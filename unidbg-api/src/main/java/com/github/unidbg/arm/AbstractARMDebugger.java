@@ -41,10 +41,12 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.PrintStream;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -55,7 +57,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -171,7 +173,7 @@ public abstract class AbstractARMDebugger implements Debugger {
                     traceHook = null;
                 }
                 if (traceHookRedirectStream != null) {
-                    IOUtils.closeQuietly(traceHookRedirectStream);
+                    com.alibaba.fastjson.util.IOUtils.close(traceHookRedirectStream);
                     traceHookRedirectStream = null;
                 }
                 if (traceRead != null) {
@@ -179,7 +181,7 @@ public abstract class AbstractARMDebugger implements Debugger {
                     traceRead = null;
                 }
                 if (traceReadRedirectStream != null) {
-                    IOUtils.closeQuietly(traceReadRedirectStream);
+                    com.alibaba.fastjson.util.IOUtils.close(traceReadRedirectStream);
                     traceReadRedirectStream = null;
                 }
                 if (traceWrite != null) {
@@ -187,7 +189,7 @@ public abstract class AbstractARMDebugger implements Debugger {
                     traceWrite = null;
                 }
                 if (traceWriteRedirectStream != null) {
-                    IOUtils.closeQuietly(traceWriteRedirectStream);
+                    com.alibaba.fastjson.util.IOUtils.close(traceWriteRedirectStream);
                     traceWriteRedirectStream = null;
                 }
                 debugging = true;
@@ -324,7 +326,7 @@ public abstract class AbstractARMDebugger implements Debugger {
                 }
 
                 if (foundTerminated) {
-                    Inspector.inspect(baos.toByteArray(), baos.size() >= 1024 ? (label + ", hex=" + Hex.encodeHexString(baos.toByteArray())) : label);
+                    Inspector.inspect(baos.toByteArray(), baos.size() >= 1024 ? (label + ", hex=" + Hex.encodeHexString(baos.toByteArray())) : (label + ", str=" + new String(baos.toByteArray(), StandardCharsets.UTF_8)));
                 } else {
                     Inspector.inspect(pointer.getByteArray(0, _length), label + ", find NULL-terminated failed");
                 }
@@ -332,7 +334,7 @@ public abstract class AbstractARMDebugger implements Debugger {
                 StdString string = StdString.createStdString(emulator, pointer);
                 long size = string.getDataSize();
                 byte[] data = string.getData();
-                Inspector.inspect(data, size >= 1024 ? (label + ", hex=" + Hex.encodeHexString(data)) : label);
+                Inspector.inspect(data, size >= 1024 ? (label + ", hex=" + Hex.encodeHexString(data) + ", std=" + new String(data, StandardCharsets.UTF_8)) : label);
             } else {
                 throw new UnsupportedOperationException("stringType=" + stringType);
             }
@@ -520,7 +522,14 @@ public abstract class AbstractARMDebugger implements Debugger {
                 begin = Utils.parseNumber(matcher.group(1));
                 end = Utils.parseNumber(matcher.group(2));
                 if (begin >= end) {
-                    System.out.printf("Set trace all memory read success.%n");
+                    File traceFile = new File("target/traceRead.txt");
+                    if (!traceFile.exists() && !traceFile.createNewFile()) {
+                        throw new IllegalStateException("createNewFile: " + traceFile);
+                    }
+                    traceReadRedirectStream = new PrintStream(new FileOutputStream(traceFile), true);
+                    traceReadRedirectStream.printf("[%s]Start traceRead", new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()));
+                    traceRead.setRedirect(traceReadRedirectStream);
+                    System.out.printf("Set trace all memory read success with trace file: %s.%n", traceFile);
                 } else {
                     boolean needTraceFile = end - begin > 0x1000;
                     if (needTraceFile) {
@@ -539,7 +548,15 @@ public abstract class AbstractARMDebugger implements Debugger {
             } else {
                 begin = 1;
                 end = 0;
-                System.out.println("Set trace all memory read success");
+
+                File traceFile = new File("target/traceRead.txt");
+                if (!traceFile.exists() && !traceFile.createNewFile()) {
+                    throw new IllegalStateException("createNewFile: " + traceFile);
+                }
+                traceReadRedirectStream = new PrintStream(new FileOutputStream(traceFile), true);
+                traceReadRedirectStream.printf("[%s]Start traceRead", new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()));
+                traceRead.setRedirect(traceReadRedirectStream);
+                System.out.printf("Set trace all memory read success with trace file: %s.%n", traceFile);
             }
             emulator.getBackend().hook_add_new((ReadHook) traceRead, begin, end, emulator);
             return false;
@@ -553,7 +570,14 @@ public abstract class AbstractARMDebugger implements Debugger {
                 begin = Utils.parseNumber(matcher.group(1));
                 end = Utils.parseNumber(matcher.group(2));
                 if (begin >= end) {
-                    System.out.printf("Set trace all memory write success.%n");
+                    File traceFile = new File("target/traceWrite.txt");
+                    if (!traceFile.exists() && !traceFile.createNewFile()) {
+                        throw new IllegalStateException("createNewFile: " + traceFile);
+                    }
+                    traceWriteRedirectStream = new PrintStream(new FileOutputStream(traceFile), true);
+                    traceWriteRedirectStream.printf("[%s]Start traceWrite", new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()));
+                    traceWrite.setRedirect(traceWriteRedirectStream);
+                    System.out.printf("Set trace all memory write success with trace file: %s.%n", traceFile);
                 } else {
                     boolean needTraceFile = end - begin > 0x1000;
                     if (needTraceFile) {
@@ -572,7 +596,15 @@ public abstract class AbstractARMDebugger implements Debugger {
             } else {
                 begin = 1;
                 end = 0;
-                System.out.println("Set trace all memory write success");
+
+                File traceFile = new File("target/traceWrite.txt");
+                if (!traceFile.exists() && !traceFile.createNewFile()) {
+                    throw new IllegalStateException("createNewFile: " + traceFile);
+                }
+                traceWriteRedirectStream = new PrintStream(new FileOutputStream(traceFile), true);
+                traceWriteRedirectStream.printf("[%s]Start traceWrite", new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()));
+                traceWrite.setRedirect(traceWriteRedirectStream);
+                System.out.printf("Set trace all memory write success with trace file: %s.%n", traceFile);
             }
             emulator.getBackend().hook_add_new((WriteHook) traceWrite, begin, end, emulator);
             return false;
@@ -731,14 +763,61 @@ public abstract class AbstractARMDebugger implements Debugger {
                 assert pointer != null;
                 pointer.write(0, code, 0, code.length);
                 disassemble(emulator, originalAddress, size, isThumb);
-                return true;
+                return false;
             } catch (AssembleFailedKeystoneException e) {
                 System.err.println("Assemble failed: " + assembly);
                 return false;
             }
         }
+        Module module = emulator.getMemory().findModuleByAddress(address);
+        if (module != null && line.startsWith("cc")) {
+            int sizeBytes = (int) Utils.parseNumber(line.substring(2).trim()) & ~1;
+            if (sizeBytes >= 2) {
+                Capstone.CsInsn[] insns = emulator.disassemble(address & ~1, sizeBytes, Short.MAX_VALUE);
+                StringBuilder sb = new StringBuilder();
+                if (emulator.is32Bit()) {
+                    sb.append("    \"").append("push {r7, lr}").append("\\n").append('"').append("\n\n");
+                } else {
+                    sb.append("    \"").append("sub sp, sp, #0x10").append("\\n").append('"').append('\n');
+                    sb.append("    \"").append("stp x29, x30, [sp]").append("\\n").append('"').append("\n\n");
+                }
+                String lastRegWrite = null;
+                for (Capstone.CsInsn insn : insns) {
+                    Capstone.CsRegsAccess regsAccess = insn.regsAccess();
+                    if (regsAccess != null && regsAccess.regsWrite != null && regsAccess.regsWrite.length == 1) {
+                        lastRegWrite = insn.regName(regsAccess.regsWrite[0]);
+                    }
+                    String asm = "    \"" + insn.mnemonic + " " + insn.opStr + "\\n\"";
+                    sb.append(String.format("%-50s", asm));
+                    sb.append(" // offset 0x").append(Long.toHexString(insn.address - (address & ~1)));
+                    sb.append("\n");
+                }
+                sb.append('\n');
 
-        showHelp();
+                if (emulator.is32Bit()) {
+                    if (lastRegWrite != null && !"r0".equals(lastRegWrite)) {
+                        sb.append("    \"").append("mov r0, ").append(lastRegWrite).append("\\n").append('"').append('\n');
+                    }
+                    sb.append("    \"").append("pop {r7, pc}").append("\\n").append('"');
+                } else {
+                    if (lastRegWrite != null && !"x0".equals(lastRegWrite) && !"w0".equals(lastRegWrite)) {
+                        sb.append("    \"").append("mov ").append(lastRegWrite.startsWith("x") ? "x0" : "w0").append(", ").append(lastRegWrite).append("\\n").append('"').append('\n');
+                    }
+                    sb.append("    \"").append("ldp x29, x30, [sp]").append("\\n").append('"').append('\n');
+                    sb.append("    \"").append("add sp, sp, #0x10").append("\\n").append('"').append('\n');
+                    sb.append("    \"").append("ret").append("\\n").append('"');
+                }
+                try(InputStream inputStream = Objects.requireNonNull(getClass().getResourceAsStream("/cc.c"))) {
+                    String template = IOUtils.toString(inputStream, StandardCharsets.UTF_8);
+                    System.err.println(template.replace("$(REPLACE_ASM)", sb.toString()));
+                }
+            } else {
+                System.err.println("Usage: cc (size bytes)");
+            }
+            return false;
+        }
+
+        showHelp(address);
         return false;
     }
 
@@ -748,7 +827,7 @@ public abstract class AbstractARMDebugger implements Debugger {
     protected void dumpClass(String className) {
     }
 
-    void showHelp() {}
+    void showHelp(long address) {}
 
     /**
      * @return next address
@@ -839,7 +918,7 @@ public abstract class AbstractARMDebugger implements Debugger {
                         throw new UnsupportedOperationException();
                     }
                     @Override
-                    public Symbol findNearestSymbolByAddress(long addr) {
+                    public Symbol findClosestSymbolByAddress(long addr, boolean fast) {
                         throw new UnsupportedOperationException();
                     }
                     @Override

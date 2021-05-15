@@ -7,6 +7,8 @@ import com.github.unidbg.Symbol;
 import com.github.unidbg.Utils;
 import com.github.unidbg.arm.ARM;
 import com.github.unidbg.hook.HookListener;
+import com.github.unidbg.ios.objc.CDObjectiveC2Processor;
+import com.github.unidbg.ios.objc.CDObjectiveCProcessor;
 import com.github.unidbg.ios.struct.DyldUnwindSections;
 import com.github.unidbg.memory.MemRegion;
 import com.github.unidbg.memory.Memory;
@@ -66,6 +68,7 @@ public class MachOModule extends Module implements com.github.unidbg.ios.MachO {
 
     private final Section fEHFrameSection;
     private final Section fUnwindInfoSection;
+    private final Map<String, MachO.SegmentCommand64.Section64> objcSections;
 
     private final Map<String, ExportSymbol> exportSymbols;
 
@@ -78,7 +81,8 @@ public class MachOModule extends Module implements com.github.unidbg.ios.MachO {
                 List<NeedLibrary> lazyLoadNeededList, Map<String, Module> upwardLibraries, Map<String, Module> exportModules,
                 String path, Emulator<?> emulator, MachO.DyldInfoCommand dyldInfoCommand, UnidbgPointer envp, UnidbgPointer apple, UnidbgPointer vars,
                 long machHeader, boolean executable, MachOLoader loader, List<HookListener> hookListeners, List<String> ordinalList,
-                Section fEHFrameSection, Section fUnwindInfoSection) {
+                Section fEHFrameSection, Section fUnwindInfoSection,
+                Map<String, MachO.SegmentCommand64.Section64> objcSections) {
         super(name, base, size, neededLibraries, regions);
         this.machO = machO;
         this.symtabCommand = symtabCommand;
@@ -99,6 +103,7 @@ public class MachOModule extends Module implements com.github.unidbg.ios.MachO {
         this.ordinalList = ordinalList;
         this.fEHFrameSection = fEHFrameSection;
         this.fUnwindInfoSection = fUnwindInfoSection;
+        this.objcSections = objcSections;
 
         this.log = LogFactory.getLog("com.github.unidbg.ios." + name);
         this.routines = machO == null ? Collections.<InitFunction>emptyList() : parseRoutines(machO);
@@ -487,20 +492,83 @@ public class MachOModule extends Module implements com.github.unidbg.ios.MachO {
         return null;
     }
 
+    private CDObjectiveCProcessor objectiveCProcessor;
+
     @Override
-    public Symbol findNearestSymbolByAddress(long addr) {
-        long abs = Long.MAX_VALUE;
-        Symbol nearestSymbol = null;
-        for (Symbol symbol : symbolMap.values()) {
-            if (symbol.getAddress() <= addr) {
-                long off = addr - symbol.getAddress();
-                if (off < abs) {
-                    abs = off;
-                    nearestSymbol = symbol;
+    public Symbol findClosestSymbolByAddress(long addr, boolean fast) {
+        long targetAddress = addr - base;
+        if (targetAddress == 0) {
+            return new ExportSymbol("__dso_handle", addr, this, 0, EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE);
+        }
+        if (targetAddress < 0) {
+            return null;
+        }
+
+        List<MachO.SymtabCommand.Nlist> symbols = symtabCommand.symbols();
+        MachO.SymtabCommand.Nlist bestSymbol = null;
+
+        // first walk all global symbols
+        for (long i = dysymtabCommand.iExtDefSym(); i < dysymtabCommand.iExtDefSym() + dysymtabCommand.nExtDefSym(); i++) {
+            MachO.SymtabCommand.Nlist nlist = symbols.get((int) i);
+            if ((nlist.type() & N_TYPE) == N_SECT) {
+                if ( bestSymbol == null ) {
+                    if ( nlist.value() <= targetAddress ) {
+                        bestSymbol = nlist;
+                    }
+                } else if ( (nlist.value() <= targetAddress) && (bestSymbol.value() < nlist.value()) ) {
+                    bestSymbol = nlist;
                 }
             }
         }
-        return nearestSymbol;
+
+        // next walk all local symbols
+        for (long i = dysymtabCommand.iLocalSym(); i < dysymtabCommand.iLocalSym() + dysymtabCommand.nLocalSym(); i++) {
+            MachO.SymtabCommand.Nlist nlist = symbols.get((int) i);
+            if ((nlist.type() & N_TYPE) == N_SECT && ((nlist.type() & N_STAB) == 0)) {
+                if ( bestSymbol == null ) {
+                    if ( nlist.value() <= targetAddress ) {
+                        bestSymbol = nlist;
+                    }
+                } else if ( (nlist.value() <= targetAddress) && (bestSymbol.value() < nlist.value()) ) {
+                    bestSymbol = nlist;
+                }
+            }
+        }
+
+        Symbol symbol = null;
+        if (bestSymbol != null) {
+            buffer.limit((int) (symtabCommand.strOff() + symtabCommand.strSize()));
+            buffer.position((int) symtabCommand.strOff());
+            ByteBuffer strBuffer = buffer.slice();
+            strBuffer.position((int) bestSymbol.un());
+            ByteBufferKaitaiStream io = new ByteBufferKaitaiStream(strBuffer);
+            String symbolName = new String(io.readBytesTerm(0, false, true, true), StandardCharsets.US_ASCII);
+            // strip off leading underscore
+            if (symbolName.startsWith("_")) {
+                symbolName = symbolName.substring(1);
+            }
+            symbol = new MachOSymbol(this, bestSymbol, symbolName);
+            // never return the mach_header symbol
+            if ((symbol.getAddress() & ~1) == base) {
+                return null;
+            }
+        }
+
+        if (!fast && objectiveCProcessor == null && objcSections != null && !objcSections.isEmpty()) {
+            objectiveCProcessor = new CDObjectiveC2Processor(buffer, objcSections);
+        }
+        if (!fast && objectiveCProcessor != null) {
+            if (executable) {
+                long entry = machHeader + entryPoint;
+                if (addr >= entry && (symbol == null || entry > symbol.getAddress())) {
+                    symbol = new ExportSymbol("main", entry, this, 0, com.github.unidbg.ios.MachO.EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE);
+                }
+            }
+
+            symbol = objectiveCProcessor.findObjcSymbol(symbol, targetAddress, this);
+        }
+
+        return symbol;
     }
 
     @Override
@@ -560,7 +628,7 @@ public class MachOModule extends Module implements com.github.unidbg.ios.MachO {
                 Collections.<String, Module>emptyMap(),
                 Collections.<String, Module>emptyMap(),
                 name, emulator, null, null, null, null, 0L, false, null,
-                Collections.<HookListener>emptyList(), Collections.<String>emptyList(), null, null) {
+                Collections.<HookListener>emptyList(), Collections.<String>emptyList(), null, null, null) {
             @Override
             public Symbol findSymbolByName(String name, boolean withDependencies) {
                 UnidbgPointer pointer = symbols.get(name);
