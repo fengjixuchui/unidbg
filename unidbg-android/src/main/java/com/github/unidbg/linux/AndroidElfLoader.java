@@ -28,6 +28,7 @@ import com.github.unidbg.spi.Loader;
 import com.github.unidbg.unix.IO;
 import com.github.unidbg.unix.Thread;
 import com.github.unidbg.unix.UnixSyscallHandler;
+import com.github.unidbg.virtualmodule.VirtualSymbol;
 import com.sun.jna.Pointer;
 import net.fornwall.jelf.ArmExIdx;
 import net.fornwall.jelf.ElfDynamicStructure;
@@ -73,7 +74,7 @@ public class AndroidElfLoader extends AbstractLoader<AndroidFileIO> implements M
         backend.mem_map(STACK_BASE - stackSize, stackSize, UnicornConst.UC_PROT_READ | UnicornConst.UC_PROT_WRITE);
 
         setStackPoint(STACK_BASE);
-        initializeTLS(new String[] {
+        this.environ = initializeTLS(new String[] {
                 "ANDROID_DATA=/data",
                 "ANDROID_ROOT=/system"
         });
@@ -123,7 +124,7 @@ public class AndroidElfLoader extends AbstractLoader<AndroidFileIO> implements M
         }
     }
 
-    private void initializeTLS(String[] envs) {
+    private UnidbgPointer initializeTLS(String[] envs) {
         final Pointer thread = allocateStack(0x400); // reserve space for pthread_internal_t
 
         final Pointer __stack_chk_guard = allocateStack(emulator.getPointerSize());
@@ -160,7 +161,7 @@ public class AndroidElfLoader extends AbstractLoader<AndroidFileIO> implements M
         }
         pointer.setPointer(0, null);
 
-        final Pointer argv = allocateStack(0x100);
+        final UnidbgPointer argv = allocateStack(0x100);
         assert argv != null;
         argv.setPointer(emulator.getPointerSize(), programNamePointer);
         argv.setPointer(2L * emulator.getPointerSize(), environ);
@@ -185,6 +186,7 @@ public class AndroidElfLoader extends AbstractLoader<AndroidFileIO> implements M
         if (log.isDebugEnabled()) {
             log.debug("initializeTLS tls=" + tls + ", argv=" + argv + ", auxv=" + auxv + ", thread=" + thread + ", environ=" + environ + ", sp=0x" + Long.toHexString(getStackPoint()));
         }
+        return argv.share(2L * emulator.getPointerSize(), 0);
     }
 
     private final Map<String, LinuxModule> modules = new LinkedHashMap<>();
@@ -276,6 +278,8 @@ public class AndroidElfLoader extends AbstractLoader<AndroidFileIO> implements M
         return dlopen(filename, true);
     }
 
+    private final UnidbgPointer environ;
+
     @Override
     public Symbol dlsym(long handle, String symbolName) {
         for (LinuxModule module : modules.values()) {
@@ -285,6 +289,9 @@ public class AndroidElfLoader extends AbstractLoader<AndroidFileIO> implements M
                     return symbol;
                 }
             }
+        }
+        if ("environ".equals(symbolName)) {
+            return new VirtualSymbol(symbolName, null, environ.toUIntPeer());
         }
         return null;
     }
@@ -690,7 +697,7 @@ public class AndroidElfLoader extends AbstractLoader<AndroidFileIO> implements M
         return (int) this.brk;
     }
 
-    private static final int MAP_FIXED = 0x10;
+    public static final int MAP_FIXED = 0x10;
     public static final int MAP_ANONYMOUS = 0x20;
 
     @Override
@@ -703,23 +710,12 @@ public class AndroidElfLoader extends AbstractLoader<AndroidFileIO> implements M
                 log.debug("mmap2 MAP_FIXED start=0x" + Long.toHexString(start) + ", length=" + length + ", prot=" + prot);
             }
 
-            MemoryMap mapped = null;
-            for (MemoryMap map : memoryMap.values()) {
-                if (start >= map.base && start + aligned <= map.base + map.size) {
-                    mapped = map;
-                }
+            munmap(start, length);
+            backend.mem_map(start, aligned, prot);
+            if (memoryMap.put(start, new MemoryMap(start, aligned, prot)) != null) {
+                log.warn("mmap2 replace exists memory map: start=" + Long.toHexString(start));
             }
-
-            if (mapped != null) {
-                munmap(start, aligned);
-                backend.mem_map(start, aligned, prot);
-                if (memoryMap.put(start, new MemoryMap(start, aligned, prot)) != null) {
-                    log.warn("mmap2 replace exists memory map: start=" + Long.toHexString(start));
-                }
-                return start;
-            } else {
-                throw new IllegalStateException("mmap2 MAP_FIXED not found mapped memory: start=0x" + Long.toHexString(start));
-            }
+            return start;
         }
         if (isAnonymous) {
             long addr = allocateMapAddress(0, aligned);
