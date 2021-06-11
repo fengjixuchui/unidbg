@@ -154,15 +154,6 @@ public class ARM {
                 case ArmConst.UC_ARM_REG_PC:
                     UnidbgPointer pc = UnidbgPointer.register(emulator, ArmConst.UC_ARM_REG_PC);
                     builder.append(String.format(Locale.US, " PC=%s", pc));
-                    Module module = emulator.getMemory().findModuleByAddress(pc.peer);
-                    if (module != null) {
-                        long peer = pc.peer & ~1L;
-                        Symbol symbol = module.findClosestSymbolByAddress(peer, false);
-                        if (symbol != null && peer - symbol.getAddress() <= Unwinder.SYMBOL_SIZE) {
-                            GccDemangler demangler = DemanglerFactory.createDemangler();
-                            builder.append(" (").append(demangler.demangle(symbol.getName())).append(" + 0x").append(Long.toHexString(peer - (symbol.getAddress() & ~1L))).append(')');
-                        }
-                    }
                     break;
                 case ArmConst.UC_ARM_REG_Q0:
                     byte[] data = backend.reg_read_vector(reg);
@@ -460,20 +451,14 @@ public class ARM {
                     value = number.longValue();
                     builder.append(String.format(Locale.US, "\nSP=0x%x", value));
                     break;
-                case Arm64Const.UC_ARM64_REG_LR:
-                    builder.append(String.format(Locale.US, "\nLR=%s", UnidbgPointer.register(emulator, Arm64Const.UC_ARM64_REG_LR)));
+                case Arm64Const.UC_ARM64_REG_LR: {
+                    UnidbgPointer lr = UnidbgPointer.register(emulator, Arm64Const.UC_ARM64_REG_LR);
+                    builder.append(String.format(Locale.US, "\nLR=%s", lr));
                     break;
+                }
                 case Arm64Const.UC_ARM64_REG_PC:
                     UnidbgPointer pc = UnidbgPointer.register(emulator, Arm64Const.UC_ARM64_REG_PC);
                     builder.append(String.format(Locale.US, "\nPC=%s", pc));
-                    Module module = emulator.getMemory().findModuleByAddress(pc.peer);
-                    if (module != null) {
-                        Symbol symbol = module.findClosestSymbolByAddress(pc.peer, false);
-                        if (symbol != null && pc.peer - symbol.getAddress() <= Unwinder.SYMBOL_SIZE) {
-                            GccDemangler demangler = DemanglerFactory.createDemangler();
-                            builder.append(" (").append(demangler.demangle(symbol.getName())).append(" + 0x").append(Long.toHexString(pc.peer - symbol.getAddress())).append(')');
-                        }
-                    }
                     break;
                 case Arm64Const.UC_ARM64_REG_Q0:
                     byte[] data = backend.reg_read_vector(reg);

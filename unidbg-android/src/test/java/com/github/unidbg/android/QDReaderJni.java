@@ -56,7 +56,7 @@ public class QDReaderJni implements ModuleListener {
         memory.setLibraryResolver(createLibraryResolver());
         memory.addModuleListener(this);
 
-        vm = emulator.createDalvikVM(null);
+        vm = emulator.createDalvikVM();
         vm.setDvmClassFactory(new ProxyClassFactory());
         vm.setVerbose(true);
         DalvikModule dm = vm.loadLibrary(new File("unidbg-android/src/test/resources/example_binaries/armeabi-v7a/libd-lib.so"), false);
@@ -103,7 +103,7 @@ public class QDReaderJni implements ModuleListener {
         final String data = "359250054370919||1551086094";
         long start = System.currentTimeMillis();
 //        emulator.traceCode();
-        ByteArray array = d.callStaticJniMethodObject(emulator, "c(Ljava/lang/String;)[B", vm.addLocalObject(new StringObject(vm, data)));
+        ByteArray array = d.callStaticJniMethodObject(emulator, "c(Ljava/lang/String;)[B", new StringObject(vm, data));
         Inspector.inspect(array.getValue(), "c offset=" + (System.currentTimeMillis() - start) + "ms");
 
         final String key = "sewxf03hhz3ew9qcCXMHiDMk";

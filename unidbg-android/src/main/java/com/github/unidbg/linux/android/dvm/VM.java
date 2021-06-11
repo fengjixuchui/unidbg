@@ -26,6 +26,7 @@ public interface VM {
     int JNIInvalidRefType = 0; // 无效引用
     int JNILocalRefType = 1; // 本地引用
     int JNIGlobalRefType = 2;  //全局引用
+    int JNIWeakGlobalRefType = 3;
 
     Pointer getJavaVM();
 
@@ -52,6 +53,7 @@ public interface VM {
     DalvikModule loadLibrary(File elfFile, boolean forceCallInit);
 
     int addLocalObject(DvmObject<?> object);
+    int addGlobalObject(DvmObject<?> object);
 
     void callJNI_OnLoad(Emulator<?> emulator, Module module);
 
@@ -67,6 +69,12 @@ public interface VM {
      * @return 可返回null
      */
     byte[] openAsset(String fileName);
+
+    /**
+     * 设置apkFile以后，可调用该方法获取压缩包内容
+     * @return 可返回null
+     */
+    byte[] unzip(String path);
 
     void setAssetResolver(AssetResolver assetResolver);
 
