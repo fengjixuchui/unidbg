@@ -83,6 +83,10 @@ public abstract class BaseVM implements VM, DvmClassFactory {
             this.obj = obj;
             this.weak = weak;
         }
+        @Override
+        public String toString() {
+            return String.valueOf(obj);
+        }
     }
 
     final Map<Integer, ObjRef> globalObjectMap = new HashMap<>();
@@ -186,7 +190,8 @@ public abstract class BaseVM implements VM, DvmClassFactory {
         if (version != JNI_VERSION_1_1 &&
                 version != JNI_VERSION_1_2 &&
                 version != JNI_VERSION_1_4 &&
-                version != JNI_VERSION_1_6) {
+                version != JNI_VERSION_1_6 &&
+                version != JNI_VERSION_1_8) {
             throw new IllegalStateException("Illegal JNI version: 0x" + Integer.toHexString(version));
         }
     }
@@ -329,7 +334,11 @@ public abstract class BaseVM implements VM, DvmClassFactory {
         MemoryMXBean memoryMXBean = ManagementFactory.getMemoryMXBean();
         MemoryUsage heap = memoryMXBean.getHeapMemoryUsage();
         MemoryUsage nonheap = memoryMXBean.getNonHeapMemoryUsage();
-        System.err.println("globalObjectSize=" + globalObjectMap.size() + ", localObjectSize=" + localObjectMap.size() + ", classSize=" + classMap.size());
+        Map<Integer, ObjRef> map = new HashMap<>(globalObjectMap);
+        for (Integer key : classMap.keySet()) {
+            map.remove(key);
+        }
+        System.err.println("globalObjectSize=" + globalObjectMap.size() + ", localObjectSize=" + localObjectMap.size() + ", classSize=" + classMap.size() + ", globalObjectSize=" + map.size());
         System.err.println("heap: " + memoryUsage(heap) + ", nonheap: " + memoryUsage(nonheap));
     }
 

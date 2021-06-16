@@ -165,7 +165,10 @@ public class DalvikVM extends BaseVM implements VM {
                 }
                 DvmObject<?> dvmObject = getObject(object.toIntPeer());
                 if (log.isDebugEnabled()) {
-                    log.debug("NewGlobalRef object=" + object + ", dvmObject=" + dvmObject + ", class=" + dvmObject.getClass());
+                    log.debug("NewGlobalRef object=" + object + ", dvmObject=" + dvmObject);
+                }
+                if (verbose) {
+                    System.out.printf("JNIEnv->NewGlobalRef(%s) was called from %s%n", dvmObject, context.getLRPointer());
                 }
                 return addGlobalObject(dvmObject);
             }
@@ -183,6 +186,9 @@ public class DalvikVM extends BaseVM implements VM {
                 if (ref != null) {
                     ref.obj.onDeleteRef();
                 }
+                if (verbose) {
+                    System.out.printf("JNIEnv->DeleteGlobalRef(%s) was called from %s%n", ref, context.getLRPointer());
+                }
                 return 0;
             }
         });
@@ -194,10 +200,6 @@ public class DalvikVM extends BaseVM implements VM {
                 UnidbgPointer object = context.getPointerArg(1);
                 if (log.isDebugEnabled()) {
                     log.debug("DeleteLocalRef object=" + object);
-                }
-                ObjRef ref = object == null ? null : localObjectMap.remove(object.toIntPeer());
-                if (ref != null) {
-                    ref.obj.onDeleteRef();
                 }
                 return 0;
             }
